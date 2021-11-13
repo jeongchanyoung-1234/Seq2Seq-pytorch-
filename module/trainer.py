@@ -34,7 +34,7 @@ class Seq2SeqTrainer:
         self.best_epoch = 0
 
     def save_model(self) -> None:
-        path = 'C:/Users/JCY/pythonProject1/seq2seq/data/model/'
+        path = '/seq2seq/data/model/'
         torch.save({'state_dict': self.model.state_dict(),
                     'config': self.config,
                     'src_vocab': self.vocab[0],

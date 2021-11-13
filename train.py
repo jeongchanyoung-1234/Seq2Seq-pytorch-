@@ -2,11 +2,10 @@ import argparse
 
 import torch.nn as nn
 import torch.optim as optim
-from torchtext.vocab import build_vocab_from_iterator
 
-from model import Seq2Seq
-from trainer import Seq2SeqTrainer
-from data_loader import DataLoader
+from seq2seq.module.model import Seq2Seq
+from seq2seq.module.trainer import Seq2SeqTrainer
+from seq2seq.module.data_loader import DataLoader
 
 
 optimizer_map = {'sgd': optim.SGD, 'adam': optim.Adam, 'rmsprop': optim.RMSprop}
@@ -32,7 +31,7 @@ def define_argparser():
     p.add_argument('--max_grad_norm', type=float, default=5.,
                    help='gradient clipping')
     p.add_argument('--epochs', type=int, default=5,
-                   help='the number of training the whole batches')
+                   help='the number of iteration training the whole batches')
     p.add_argument('--verbose', type=int, default=1,
                    help='print traning logs every n-epochs')
     p.add_argument('--reverse_input', action='store_true',

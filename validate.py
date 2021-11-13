@@ -3,7 +3,7 @@ import sys
 
 import torch
 
-from model import Seq2Seq
+from seq2seq.module.model import Seq2Seq
 
 def main(path='C:/Users/JCY/pythonProject1/seq2seq/data/model/') -> str:
     task = sys.argv[1]
