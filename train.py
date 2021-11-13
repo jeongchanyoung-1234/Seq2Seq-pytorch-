@@ -3,7 +3,7 @@ import argparse
 import torch.nn as nn
 import torch.optim as optim
 
-from module.model import Seq2Seq
+from module.model import Seq2Seq, Transformer
 from module.trainer import Seq2SeqTrainer
 from module.data_loader import DataLoader
 
@@ -22,6 +22,7 @@ def define_argparser():
                    help='the output size of embedding layer')
     p.add_argument('--n_layers', type=int, default=2,
                    help='the number of layers in both encoder and decoder')
+    p.add_argument('--n_head', type=int, default=4)
     p.add_argument('--dropout', type=float, default=.5,
                    help='the ratio of dropout')
     p.add_argument('--optimizer', type=str, default='adam',
@@ -36,6 +37,8 @@ def define_argparser():
                    help='print traning logs every n-epochs')
     p.add_argument('--reverse_input', action='store_true',
                    help='reversing the input, which is suggested at GNMT')
+    p.add_argument('--use_transformer', action='store_true',
+                   help='use transformer architecture')
     p.add_argument('--file_fn', type=str, default='date.csv',
                    help='training source filename')
     p.add_argument('--save_model', action='store_true',
@@ -60,7 +63,8 @@ def main(config):
     print('|Source vocabulary|:', src_vocab_size)
     print('|Target vocabulary|:', tgt_vocab_size)
 
-    model = Seq2Seq(config, src_vocab_size, tgt_vocab_size)
+    model = Transformer(config, src_vocab_size, tgt_vocab_size) if config.use_transformer else Seq2Seq(config, src_vocab_size, tgt_vocab_size)
+
     optimizer = optimizer_map[config.optimizer.lower()](model.parameters(), lr=config.lr)
     criterion = nn.NLLLoss()
 

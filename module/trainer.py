@@ -39,13 +39,14 @@ class Seq2SeqTrainer:
                     'src_vocab': self.vocab[0],
                     'tgt_vocab': self.vocab[1]
                     },
-                   path + 'seq2seq.{}.bs{}.ed{}.hs{}.ep{}.pth'.format(
+                   path + 'seq2seq.{}.bs{}.ed{}.hs{}.ep{}.{}'.format(
             self.config.file_fn[:-4],
             self.config.batch_size,
             self.config.embedding_dim,
             self.config.hidden_size,
-            self.best_epoch
-        ))
+            self.best_epoch,
+            'transformer' if self.config.use_transformer else 'rnn'
+        ) + '.pth')
 
     def print_config(self) -> None:
         pp = PrettyPrinter(indent=4)
@@ -76,7 +77,7 @@ class Seq2SeqTrainer:
                 clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
                 self.optimizer.step()
 
-                total_train_loss += loss
+                total_train_loss += loss.detach()
                 total_train_acc += acc
                 train_cnt += 1
 
@@ -94,7 +95,7 @@ class Seq2SeqTrainer:
                     loss = self.criterion(y_hat.contiguous().view(-1, y_hat.size(-1)), batch_y[:, 1 :].contiguous().view(-1)) # num_classes가 먼저 와야함!
                     acc = Accuracy()(y_hat.contiguous().view(-1, y_hat.size(-1)), batch_y[:, 1 :].contiguous().view(-1)) #Constructor의 내부에서 second argument를 boolean으로 사용해서 오류
 
-                total_valid_loss += loss
+                total_valid_loss += loss.detach()
                 total_valid_acc += acc
                 valid_cnt += 1
 

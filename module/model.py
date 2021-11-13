@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 
@@ -176,6 +178,7 @@ class Seq2Seq(nn.Module):
         self.encoder = Encoder(config, src_vocab_size)
         self.decoder = Decoder(config, tgt_vocab_size)
 
+
     def forward(self, x_enc, x_dec):
         mask = (x_enc == self.pad_idx)
         x_enc, h_enc = self.encoder(x_enc)
@@ -189,8 +192,99 @@ class Seq2Seq(nn.Module):
             x_enc, h_enc = self.encoder(x_enc)
             y = self.decoder.generate(h_enc, x_enc, bos_token, mask)
 
+
         return y
 
+
+class TransformerGenerator(nn.Module):
+    def __init__(self,
+                 config,
+                 tgt_vocab_size):
+        super(TransformerGenerator, self).__init__()
+        self.linear = nn.Linear(config.embedding_dim, tgt_vocab_size)
+        self.softmax = nn.LogSoftmax(dim=-1)
+
+    def forward(self, x):
+        x = self.linear(x)
+        x = self.softmax(x)
+        return x
+
+
+class Transformer(nn.Module): # embedding, encoding, generator(emb, vocab) 정의 필요
+    def __init__(self,
+                 config,
+                 src_vocab_size,
+                 tgt_vocab_size,
+                 pad_idx=1):
+        super(Transformer, self).__init__()
+        self.config = config
+        self.pad_idx = pad_idx
+        self.model = nn.Transformer(
+            d_model=config.embedding_dim,
+            nhead=config.n_head,
+            num_encoder_layers=config.n_layers,
+            num_decoder_layers=config.n_layers,
+            dim_feedforward=config.hidden_size,
+            dropout=config.dropout,
+            batch_first=True,
+            norm_first=True,
+            device='cuda' if torch.cuda.is_available() else 'cpu'
+        )
+        self.src_embedding = nn.Embedding(src_vocab_size, config.embedding_dim, pad_idx)
+        self.tgt_embedding = nn.Embedding(tgt_vocab_size, config.embedding_dim, pad_idx)
+
+        w = torch.exp(-torch.arange(0, config.embedding_dim, 2) * math.log(10000) / config.embedding_dim)
+        p = torch.arange(0, 10).unsqueeze(-1)
+        self.positional_encoding = torch.zeros((10, config.embedding_dim))
+        self.positional_encoding[:, 0::2] = torch.sin(w * p)
+        self.positional_encoding[:, 1::2] = torch.cos(w * p)
+
+        self.generator = TransformerGenerator(config, tgt_vocab_size)
+
+    def generate_mask(self, src, tgt=None) -> tuple:
+        src_mask = nn.Transformer.generate_square_subsequent_mask(src.size(1))
+        tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt.size(1))
+
+        src_key_padding_mask = (src == self.pad_idx).type(torch.bool)
+        tgt_key_padding_mask = (tgt == self.pad_idx).type(torch.bool)
+
+        return src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask
+
+    def forward(self, src, tgt):
+        _, tgt_mask, src_key_padding_mask, tgt_key_padding_mask = self.generate_mask(src, tgt)
+        src, tgt = self.src_embedding(src) + self.positional_encoding[:src.size(1), :], self.tgt_embedding(tgt) + self.positional_encoding[:tgt.size(1), :]
+        out = self.model(
+            src, tgt,
+            src_mask=None,
+            tgt_mask=tgt_mask,
+            src_key_padding_mask=src_key_padding_mask,
+            tgt_key_padding_mask=tgt_key_padding_mask
+        )
+        out = self.generator(out)[:, 1:, :] # sequential하지 않기 때문에 bos를 같이 반환
+        return out
+
+    def validate(self, src, bos_token):
+        src_key_padding_mask = (src == self.pad_idx).type(torch.bool)
+        src = self.src_embedding(src) + self.positional_encoding[:src.size(1), :]
+        memory = self.model.encoder(
+            src,
+            mask=None,
+            src_key_padding_mask=src_key_padding_mask
+        )
+
+        result = [bos_token]
+        while result[-1] != 2:
+            tgt = torch.Tensor(result).type(torch.int).unsqueeze(0)
+            tgt_key_padding_mask = (tgt == self.pad_idx).type(torch.bool)
+            tgt = self.tgt_embedding(tgt) + self.positional_encoding[:tgt.size(1)]
+            tgt_mask = self.model.generate_square_subsequent_mask(tgt.size(1))
+            y_hat = self.model.decoder(
+                tgt,
+                memory,
+                tgt_mask=tgt_mask,
+                tgt_key_padding_mask=tgt_key_padding_mask
+            ).argmax(-1)[:, -1].item()
+            result.append(y_hat)
 
 if __name__ == '__main__':
     class Config:

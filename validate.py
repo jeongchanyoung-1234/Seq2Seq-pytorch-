@@ -3,17 +3,21 @@ import sys
 
 import torch
 
-from seq2seq.module.model import Seq2Seq
+from module.model import Seq2Seq, Transformer
 
 def main(path='C:/Users/JCY/pythonProject1/seq2seq/data/model/') -> str:
     task = sys.argv[1]
-    input = sys.argv[2]
+    model = sys.argv[2]
+    input = sys.argv[3]
 
     if task == 'date' :
         model_fn = 'seq2seq.date.bs128.ed16.hs128.ep2.pth'
         bos_token = 8
     elif task == 'addition' :
-        model_fn = 'seq2seq.addition.bs128.ed8.hs64.ep25.pth'
+        if model == 'transformer':
+            model_fn = 'seq2seq.addition.bs128.ed8.hs64.ep1.transformer.pth'
+        elif model == 'seq2seq':
+            model_fn = 'seq2seq.addition.bs128.ed8.hs64.ep25.pth'
         bos_token = 3
 
     dic = torch.load(path + model_fn)
@@ -25,8 +29,13 @@ def main(path='C:/Users/JCY/pythonProject1/seq2seq/data/model/') -> str:
     src_vocab_size = len(src_vocab)
     tgt_vocab_size = len(tgt_vocab)
 
-    model = Seq2Seq(config, src_vocab_size, tgt_vocab_size)
-    model.load_state_dict(state_dict)
+    if model == 'transformer':
+        model = Transformer(config, src_vocab_size, tgt_vocab_size)
+        model.load_state_dict(state_dict)
+
+    elif model == 'seq2seq':
+        model = Seq2Seq(config, src_vocab_size, tgt_vocab_size)
+        model.load_state_dict(state_dict)
 
     input = list(re.sub(' {1,}', ' ', input).lower().strip())
 
