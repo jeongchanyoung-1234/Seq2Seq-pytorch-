@@ -3,9 +3,9 @@ import argparse
 import torch.nn as nn
 import torch.optim as optim
 
-from seq2seq.module.model import Seq2Seq
-from seq2seq.module.trainer import Seq2SeqTrainer
-from seq2seq.module.data_loader import DataLoader
+from module.model import Seq2Seq
+from module.trainer import Seq2SeqTrainer
+from module.data_loader import DataLoader
 
 
 optimizer_map = {'sgd': optim.SGD, 'adam': optim.Adam, 'rmsprop': optim.RMSprop}
@@ -38,6 +38,8 @@ def define_argparser():
                    help='reversing the input, which is suggested at GNMT')
     p.add_argument('--file_fn', type=str, default='date.csv',
                    help='training source filename')
+    p.add_argument('--save_model', action='store_true',
+                   help='save model if best accuracy is updated')
 
     config = p.parse_args()
     return config

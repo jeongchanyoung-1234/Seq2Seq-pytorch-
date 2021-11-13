@@ -33,8 +33,7 @@ class Seq2SeqTrainer:
         self.best_accuracy = 0
         self.best_epoch = 0
 
-    def save_model(self) -> None:
-        path = '/seq2seq/data/model/'
+    def save_model(self, path='./seq2seq/data/model/') -> None:
         torch.save({'state_dict': self.model.state_dict(),
                     'config': self.config,
                     'src_vocab': self.vocab[0],
@@ -105,7 +104,7 @@ class Seq2SeqTrainer:
             if avg_valid_acc > self.best_accuracy:
                 self.best_accuracy = avg_valid_acc
                 self.best_epoch = epoch
-                self.save_model()
+                if self.config.save_model: self.save_model()
 
             p_norm, g_norm = get_norm(self.model.parameters())
 
@@ -121,6 +120,9 @@ class Seq2SeqTrainer:
                     p_norm, g_norm,
                     time.time() - start
                 ))
+
+            total_train_loss, total_train_acc, train_cnt = 0, 0, 0
+            total_valid_loss, total_valid_acc, valid_cnt = 0, 0, 0
 
         print('''
         |Training completed|
