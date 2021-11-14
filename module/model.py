@@ -191,8 +191,6 @@ class Seq2Seq(nn.Module):
             mask = (x_enc == self.pad_idx)
             x_enc, h_enc = self.encoder(x_enc)
             y = self.decoder.generate(h_enc, x_enc, bos_token, mask)
-
-
         return y
 
 
@@ -209,6 +207,53 @@ class TransformerGenerator(nn.Module):
         x = self.softmax(x)
         return x
 
+class EncoderPositionalEncoding(nn.Module):
+    def __init__(self,
+                 config,
+                 src_vocab_size,
+                 pad_idx=1,
+                 max_len=100):
+        super(EncoderPositionalEncoding, self).__init__()
+        self.config = config
+        self.src_embedding = nn.Embedding(src_vocab_size, config.embedding_dim, pad_idx)
+
+        w = torch.exp(-torch.arange(0, config.embedding_dim, 2) * math.log(10000) / config.embedding_dim)
+        p = torch.arange(0, max_len).reshape(max_len, 1)
+        self.positional_encoding = torch.zeros((max_len, config.embedding_dim))
+        self.positional_encoding[:, 0 : :2] = torch.sin(p * w)
+        self.positional_encoding[:, 1 : :2] = torch.cos(p * w)
+        self.positional_encoding = self.positional_encoding.unsqueeze(0)
+        self.dropout = nn.Dropout(config.dropout)
+
+    def forward(self, x):
+        x_emb = self.src_embedding(x) * math.sqrt(self.config.embedding_dim)
+        x = x_emb + self.positional_encoding[:, :x_emb.size(1)]
+        x = self.dropout(x)
+        return x
+
+class DecoderPositionalEncoding(nn.Module):
+    def __init__(self,
+                 config,
+                 tgt_vocab_size,
+                 pad_idx=1,
+                 max_len=100):
+        super(DecoderPositionalEncoding, self).__init__()
+        self.config = config
+        self.tgt_embedding = nn.Embedding(tgt_vocab_size, config.embedding_dim, pad_idx)
+
+        w = torch.exp(-torch.arange(0, config.embedding_dim, 2) * math.log(10000) / config.embedding_dim)
+        p = torch.arange(0, max_len).reshape(max_len, 1)
+        self.positional_encoding = torch.zeros((max_len, config.embedding_dim))
+        self.positional_encoding[:, 0 : :2] = torch.sin(p * w)
+        self.positional_encoding[:, 1 : :2] = torch.cos(p * w)
+        self.positional_encoding = self.positional_encoding.unsqueeze(0)
+        self.dropout = nn.Dropout(config.dropout)
+
+    def forward(self, x):
+        x_emb = self.tgt_embedding(x) * math.sqrt(self.config.embedding_dim)
+        x = x_emb + self.positional_encoding[:, :x_emb.size(1)]
+        x = self.dropout(x)
+        return x
 
 class Transformer(nn.Module): # embedding, encoding, generator(emb, vocab) 정의 필요
     def __init__(self,
@@ -230,61 +275,61 @@ class Transformer(nn.Module): # embedding, encoding, generator(emb, vocab) 정�
             norm_first=True,
             device='cuda' if torch.cuda.is_available() else 'cpu'
         )
-        self.src_embedding = nn.Embedding(src_vocab_size, config.embedding_dim, pad_idx)
-        self.tgt_embedding = nn.Embedding(tgt_vocab_size, config.embedding_dim, pad_idx)
-
-        w = torch.exp(-torch.arange(0, config.embedding_dim, 2) * math.log(10000) / config.embedding_dim)
-        p = torch.arange(0, 10).unsqueeze(-1)
-        self.positional_encoding = torch.zeros((10, config.embedding_dim))
-        self.positional_encoding[:, 0::2] = torch.sin(w * p)
-        self.positional_encoding[:, 1::2] = torch.cos(w * p)
-
+        self.src_pe = EncoderPositionalEncoding(config, src_vocab_size)
+        self.tgt_pe = DecoderPositionalEncoding(config, tgt_vocab_size)
         self.generator = TransformerGenerator(config, tgt_vocab_size)
 
-    def generate_mask(self, src, tgt=None) -> tuple:
-        src_mask = nn.Transformer.generate_square_subsequent_mask(src.size(1))
-        tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt.size(1))
-
-        src_key_padding_mask = (src == self.pad_idx).type(torch.bool)
-        tgt_key_padding_mask = (tgt == self.pad_idx).type(torch.bool)
-
-        return src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask
+    def generate_mask(self, src=None, tgt=None) -> tuple:
+        result = tuple()
+        if src is not None:
+            src_mask = torch.zeros((src.size(1), src.size(1))).type(torch.bool)
+            src_key_padding_mask = (src == self.pad_idx).type(torch.bool)
+            result += src_mask, src_key_padding_mask
+        if tgt is not None:
+            tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt.size(1))
+            tgt_key_padding_mask = (tgt == self.pad_idx).type(torch.bool)
+            result += tgt_mask, tgt_key_padding_mask
+        return result
 
     def forward(self, src, tgt):
-        _, tgt_mask, src_key_padding_mask, tgt_key_padding_mask = self.generate_mask(src, tgt)
-        src, tgt = self.src_embedding(src) + self.positional_encoding[:src.size(1), :], self.tgt_embedding(tgt) + self.positional_encoding[:tgt.size(1), :]
+        tgt = tgt[:, :-1]
+        src_mask, src_key_padding_mask, tgt_mask, tgt_key_padding_mask = self.generate_mask(src, tgt)
+        src, tgt = self.src_pe(src), self.tgt_pe(tgt)
         out = self.model(
             src, tgt,
-            src_mask=None,
+            src_mask=src_mask,
             tgt_mask=tgt_mask,
             src_key_padding_mask=src_key_padding_mask,
-            tgt_key_padding_mask=tgt_key_padding_mask
+            tgt_key_padding_mask=tgt_key_padding_mask,
+            memory_key_padding_mask=src_key_padding_mask,
         )
-        out = self.generator(out)[:, 1:, :] # sequential하지 않기 때문에 bos를 같이 반환
+        out = self.generator(out)
         return out
 
     def validate(self, src, bos_token):
-        src_key_padding_mask = (src == self.pad_idx).type(torch.bool)
-        src = self.src_embedding(src) + self.positional_encoding[:src.size(1), :]
+        src_mask, src_key_padding_mask = self.generate_mask(src, None)
+        src = self.src_pe(src)
         memory = self.model.encoder(
             src,
-            mask=None,
+            mask=src_mask,
             src_key_padding_mask=src_key_padding_mask
         )
 
         result = [bos_token]
         while result[-1] != 2:
             tgt = torch.Tensor(result).type(torch.int).unsqueeze(0)
-            tgt_key_padding_mask = (tgt == self.pad_idx).type(torch.bool)
-            tgt = self.tgt_embedding(tgt) + self.positional_encoding[:tgt.size(1)]
-            tgt_mask = self.model.generate_square_subsequent_mask(tgt.size(1))
-            y_hat = self.model.decoder(
+            tgt_mask, tgt_key_padding_mask = self.generate_mask(None, tgt)
+            tgt = self.tgt_pe(tgt)
+            y_hat = self.generator(self.model.decoder(
                 tgt,
                 memory,
                 tgt_mask=tgt_mask,
-                tgt_key_padding_mask=tgt_key_padding_mask
-            ).argmax(-1)[:, -1].item()
+                tgt_key_padding_mask=tgt_key_padding_mask,
+                memory_key_padding_mask=src_key_padding_mask
+            )).argmax(-1)[:, -1].item()
             result.append(y_hat)
+
+        return result
 
 if __name__ == '__main__':
     class Config:

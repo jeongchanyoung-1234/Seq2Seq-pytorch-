@@ -11,7 +11,7 @@ python train.py [--parameters]
 
 ### Validation
 ```buildoutcfg
-python validate.py [date/addition] [input]
+python validate.py [date/addition] [transformer(unstable)/seq2seq] [input]
 ```
 * date: convert input date into uniform style.
   ex)
@@ -38,4 +38,5 @@ python validate.py [date/addition] [input]
 * epochs: the number of iteration training the whole batches (default 5)
 * verbose: print training logs every n-epochs (default 1)
 * reverse_input: reversing the input, which is suggested at GNMT (True if provided)
+* use_transformer: use transformer (unstable)
 * file_fn: training source filename

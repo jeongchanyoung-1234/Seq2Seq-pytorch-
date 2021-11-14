@@ -11,11 +11,14 @@ def main(path='C:/Users/JCY/pythonProject1/seq2seq/data/model/') -> str:
     input = sys.argv[3]
 
     if task == 'date' :
-        model_fn = 'seq2seq.date.bs128.ed16.hs128.ep2.pth'
+        if model == 'transformer' :
+            model_fn = 'seq2seq.date.bs128.ed16.hs128.ep5.transformer.pth'
+        elif model == 'seq2seq':
+            model_fn = 'seq2seq.date.bs128.ed16.hs128.ep2.pth'
         bos_token = 8
     elif task == 'addition' :
         if model == 'transformer':
-            model_fn = 'seq2seq.addition.bs128.ed8.hs64.ep1.transformer.pth'
+            model_fn = 'seq2seq.addition.bs128.ed16.hs128.ep2.transformer.pth'
         elif model == 'seq2seq':
             model_fn = 'seq2seq.addition.bs128.ed8.hs64.ep25.pth'
         bos_token = 3

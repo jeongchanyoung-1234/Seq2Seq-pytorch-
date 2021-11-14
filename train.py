@@ -39,7 +39,7 @@ def define_argparser():
                    help='reversing the input, which is suggested at GNMT')
     p.add_argument('--use_transformer', action='store_true',
                    help='use transformer architecture')
-    p.add_argument('--file_fn', type=str, default='date.csv',
+    p.add_argument('--file_fn', type=str, required=True,
                    help='training source filename')
     p.add_argument('--save_model', action='store_true',
                    help='save model if best accuracy is updated')
@@ -66,7 +66,7 @@ def main(config):
     model = Transformer(config, src_vocab_size, tgt_vocab_size) if config.use_transformer else Seq2Seq(config, src_vocab_size, tgt_vocab_size)
 
     optimizer = optimizer_map[config.optimizer.lower()](model.parameters(), lr=config.lr)
-    criterion = nn.NLLLoss()
+    criterion = nn.NLLLoss(ignore_index=1)
 
     trainer = Seq2SeqTrainer(
         config,

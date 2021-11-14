@@ -69,7 +69,7 @@ class Seq2SeqTrainer:
                     batch_x = torch.index_select(batch_x, -1, idx).contiguous()
 
                 y_hat = self.model(batch_x, batch_y)
-                loss = self.criterion(y_hat.contiguous().reshape(-1, y_hat.size(-1)), batch_y[:, 1:].contiguous().view(-1)) # (b * l, v)
+                loss = self.criterion(y_hat.contiguous().view(-1, y_hat.size(-1)), batch_y[:, 1:].contiguous().view(-1)) # (b * l, v)
                 acc = Accuracy()(y_hat.contiguous().reshape(-1, y_hat.size(-1)), batch_y[:, 1:].contiguous().view(-1))
 
                 self.optimizer.zero_grad()
