@@ -66,7 +66,7 @@ def main(config):
     model = Transformer(config, src_vocab_size, tgt_vocab_size) if config.use_transformer else Seq2Seq(config, src_vocab_size, tgt_vocab_size)
 
     optimizer = optimizer_map[config.optimizer.lower()](model.parameters(), lr=config.lr)
-    criterion = nn.NLLLoss(ignore_index=1)
+    criterion = nn.NLLLoss()
 
     trainer = Seq2SeqTrainer(
         config,

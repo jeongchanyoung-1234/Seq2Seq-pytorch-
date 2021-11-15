@@ -3,6 +3,9 @@ import math
 import torch
 import torch.nn as nn
 
+import pytorch_lightning as pl
+from torchmetrics import Accuracy
+
 
 class Attention(nn.Module):
     def __init__(self,
@@ -113,7 +116,7 @@ class Decoder(nn.Module):
         prev_output = None
 
         outs = []
-        for i in range(xs.size(1) - 1):
+        for i in range(xs.size(1)):
             x = xs[:, i, :].unsqueeze(1)
 
             if prev_output is None:
@@ -194,39 +197,113 @@ class Seq2Seq(nn.Module):
         return y
 
 
+class Transformer(nn.Module):
+    def __init__(self,
+                 config,
+                 src_vocab_size,
+                 tgt_vocab_size,
+                 pad_idx=1,
+                 max_len=20):
+        super(Transformer, self).__init__()
+        self.config = config
+        self.pad_idx = pad_idx
+
+        w = torch.exp(-torch.arange(0, config.embedding_dim, 2) * math.log(10000) / config.embedding_dim)
+        p = torch.arange(0, max_len).reshape(max_len, 1)
+        positional_encoding = torch.zeros((max_len, config.embedding_dim))
+        positional_encoding[:, 0 : :2] = torch.sin(p * w)
+        positional_encoding[:, 1 : :2] = torch.cos(p * w)
+        positional_encoding = positional_encoding.unsqueeze(0)
+
+        self.src_embedding = EncoderPositionalEncoding(config, src_vocab_size, positional_encoding)
+        self.tgt_embedding = DecoderPositionalEncoding(config, tgt_vocab_size, positional_encoding)
+
+        self.encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=config.embedding_dim,
+                nhead=config.n_head,
+                dim_feedforward=config.hidden_size,
+                dropout=config.dropout,
+                batch_first=True,
+                norm_first=True
+            ),
+            num_layers=config.n_layers
+        )
+        self.decoder = nn.TransformerDecoder(
+            nn.TransformerDecoderLayer(
+                d_model=config.embedding_dim,
+                nhead=config.n_head,
+                dim_feedforward=config.hidden_size,
+                dropout=config.dropout,
+                batch_first=True,
+                norm_first=True
+            ),
+            num_layers=config.n_layers
+        )
+        self.generator = TransformerGenerator(config, tgt_vocab_size)
+
+    def generate_mask(self, src, tgt):
+        result = tuple()
+        if src is not None:
+            src_mask = torch.zeros((src.size(1), src.size(1))).type(torch.bool)
+            src_key_padding_mask = (src == self.pad_idx).type(torch.bool)
+            result += src_mask, src_key_padding_mask
+        if tgt is not None:
+            tgt_mask = nn.Transformer().generate_square_subsequent_mask(tgt.size(1))
+            tgt_key_padding_mask = (tgt == self.pad_idx).type(torch.bool)
+            result += tgt_mask, tgt_key_padding_mask
+        return result
+
+
+    def forward(self, src, tgt):
+        src_mask, src_key_padding_mask, tgt_mask, tgt_key_padding_mask = self.generate_mask(src, tgt)
+
+        src_emb, tgt_emb = self.src_embedding(src), self.tgt_embedding(tgt)
+
+        x_enc = self.encoder(
+            src_emb,
+            mask=src_mask,
+            src_key_padding_mask=src_key_padding_mask
+        )
+        x_dec = self.decoder(
+            tgt=tgt_emb,
+            memory=x_enc,
+            tgt_mask=tgt_mask,
+            tgt_key_padding_mask=tgt_key_padding_mask,
+            memory_key_padding_mask=src_key_padding_mask
+        )
+        out = self.generator(x_dec)
+
+        return out
+
 class TransformerGenerator(nn.Module):
     def __init__(self,
                  config,
                  tgt_vocab_size):
         super(TransformerGenerator, self).__init__()
+        self.config = config
         self.linear = nn.Linear(config.embedding_dim, tgt_vocab_size)
         self.softmax = nn.LogSoftmax(dim=-1)
 
     def forward(self, x):
         x = self.linear(x)
-        x = self.softmax(x)
-        return x
+        out = self.softmax(x)
+        return out
 
 class EncoderPositionalEncoding(nn.Module):
     def __init__(self,
                  config,
                  src_vocab_size,
-                 pad_idx=1,
-                 max_len=100):
+                 pe,
+                 pad_idx=1):
         super(EncoderPositionalEncoding, self).__init__()
         self.config = config
         self.src_embedding = nn.Embedding(src_vocab_size, config.embedding_dim, pad_idx)
-
-        w = torch.exp(-torch.arange(0, config.embedding_dim, 2) * math.log(10000) / config.embedding_dim)
-        p = torch.arange(0, max_len).reshape(max_len, 1)
-        self.positional_encoding = torch.zeros((max_len, config.embedding_dim))
-        self.positional_encoding[:, 0 : :2] = torch.sin(p * w)
-        self.positional_encoding[:, 1 : :2] = torch.cos(p * w)
-        self.positional_encoding = self.positional_encoding.unsqueeze(0)
+        self.positional_encoding = pe
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
-        x_emb = self.src_embedding(x) * math.sqrt(self.config.embedding_dim)
+        x_emb = self.src_embedding(x)
         x = x_emb + self.positional_encoding[:, :x_emb.size(1)]
         x = self.dropout(x)
         return x
@@ -235,112 +312,81 @@ class DecoderPositionalEncoding(nn.Module):
     def __init__(self,
                  config,
                  tgt_vocab_size,
-                 pad_idx=1,
-                 max_len=100):
+                 pe,
+                 pad_idx=1):
         super(DecoderPositionalEncoding, self).__init__()
         self.config = config
         self.tgt_embedding = nn.Embedding(tgt_vocab_size, config.embedding_dim, pad_idx)
-
-        w = torch.exp(-torch.arange(0, config.embedding_dim, 2) * math.log(10000) / config.embedding_dim)
-        p = torch.arange(0, max_len).reshape(max_len, 1)
-        self.positional_encoding = torch.zeros((max_len, config.embedding_dim))
-        self.positional_encoding[:, 0 : :2] = torch.sin(p * w)
-        self.positional_encoding[:, 1 : :2] = torch.cos(p * w)
-        self.positional_encoding = self.positional_encoding.unsqueeze(0)
+        self.positional_encoding = pe
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
-        x_emb = self.tgt_embedding(x) * math.sqrt(self.config.embedding_dim)
+        x_emb = self.tgt_embedding(x)
         x = x_emb + self.positional_encoding[:, :x_emb.size(1)]
         x = self.dropout(x)
         return x
 
-class Transformer(nn.Module): # embedding, encoding, generator(emb, vocab) 정의 필요
+class Classifier(pl.LightningModule):
     def __init__(self,
                  config,
-                 src_vocab_size,
-                 tgt_vocab_size,
-                 pad_idx=1):
-        super(Transformer, self).__init__()
+                 src_vocab_size):
+        super(Classifier, self).__init__()
         self.config = config
-        self.pad_idx = pad_idx
-        self.model = nn.Transformer(
-            d_model=config.embedding_dim,
-            nhead=config.n_head,
-            num_encoder_layers=config.n_layers,
-            num_decoder_layers=config.n_layers,
-            dim_feedforward=config.hidden_size,
-            dropout=config.dropout,
+        self.embedding = nn.Embedding(src_vocab_size, config.embedding_dim)
+        self.lstm = nn.LSTM(
+            input_size=config.embedding_dim,
+            hidden_size=config.hidden_size,
+            num_layers=config.n_layers,
             batch_first=True,
-            norm_first=True,
-            device='cuda' if torch.cuda.is_available() else 'cpu'
+            dropout=config.dropout if config.n_layers > 1 else 0.,
+            bidirectional=True
         )
-        self.src_pe = EncoderPositionalEncoding(config, src_vocab_size)
-        self.tgt_pe = DecoderPositionalEncoding(config, tgt_vocab_size)
-        self.generator = TransformerGenerator(config, tgt_vocab_size)
+        self.flatten = nn.Flatten()
+        self.linear1 = nn.Linear(config.hidden_size * 20, config.hidden_size)
+        self.relu = nn.ReLU()
+        self.linear2 = nn.Linear(config.hidden_size, 2)
+        self.softmax = nn.LogSoftmax(dim=-1)
 
-    def generate_mask(self, src=None, tgt=None) -> tuple:
-        result = tuple()
-        if src is not None:
-            src_mask = torch.zeros((src.size(1), src.size(1))).type(torch.bool)
-            src_key_padding_mask = (src == self.pad_idx).type(torch.bool)
-            result += src_mask, src_key_padding_mask
-        if tgt is not None:
-            tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt.size(1))
-            tgt_key_padding_mask = (tgt == self.pad_idx).type(torch.bool)
-            result += tgt_mask, tgt_key_padding_mask
-        return result
+        self.accuracy = Accuracy()
+        self.save_hyperparameters()
 
-    def forward(self, src, tgt):
-        tgt = tgt[:, :-1]
-        src_mask, src_key_padding_mask, tgt_mask, tgt_key_padding_mask = self.generate_mask(src, tgt)
-        src, tgt = self.src_pe(src), self.tgt_pe(tgt)
-        out = self.model(
-            src, tgt,
-            src_mask=src_mask,
-            tgt_mask=tgt_mask,
-            src_key_padding_mask=src_key_padding_mask,
-            tgt_key_padding_mask=tgt_key_padding_mask,
-            memory_key_padding_mask=src_key_padding_mask,
-        )
-        out = self.generator(out)
-        return out
+    def forward(self, x):
+        x = self.embedding(x)
+        x_enc, _ = self.lstm(x)
 
-    def validate(self, src, bos_token):
-        src_mask, src_key_padding_mask = self.generate_mask(src, None)
-        src = self.src_pe(src)
-        memory = self.model.encoder(
-            src,
-            mask=src_mask,
-            src_key_padding_mask=src_key_padding_mask
-        )
+        x = self.flatten(x_enc)
+        x = self.linear2(self.linear1(x))
+        y_hat = self.softmax(x)
+        return y_hat
 
-        result = [bos_token]
-        while result[-1] != 2:
-            tgt = torch.Tensor(result).type(torch.int).unsqueeze(0)
-            tgt_mask, tgt_key_padding_mask = self.generate_mask(None, tgt)
-            tgt = self.tgt_pe(tgt)
-            y_hat = self.generator(self.model.decoder(
-                tgt,
-                memory,
-                tgt_mask=tgt_mask,
-                tgt_key_padding_mask=tgt_key_padding_mask,
-                memory_key_padding_mask=src_key_padding_mask
-            )).argmax(-1)[:, -1].item()
-            result.append(y_hat)
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.config.lr)
+        return optimizer
 
-        return result
+    def training_step(self, train_batch, batch_idx):
+        x, y = train_batch
+        x = self.embedding(x)
+        x_enc, _ = self.lstm(x)
 
-if __name__ == '__main__':
-    class Config:
-        def __init__(self):
-            self.hidden_size = 32
-            self.n_layers = 2
-            self.dropout = .5
+        x = self.flatten(x_enc)
+        x = self.linear2(self.linear1(x))
+        y_hat = self.softmax(x)
+        loss = nn.NLLLoss()(y_hat, y)
+        acc = self.accuracy(y_hat, y)
+        self.log('train_loss', loss)
+        self.log('train_acc', acc, on_step=True, on_epoch=False)
+        return {'loss':loss, 'acc': acc}
 
-    config = Config()
-    h_enc = torch.rand(16, 10, 32)
-    h_t_dec = torch.rand(16, 1, 32)
+    def validation_step(self, valid_batch, batch_idx):
+        x, y = valid_batch
+        x = self.embedding(x)
+        x_enc, _ = self.lstm(x)
 
-    attention = Attention()
-    attention(h_t_dec, h_enc)
+        x = self.flatten(x_enc)
+        x = self.linear2(self.linear1(x))
+        y_hat = self.softmax(x)
+        loss = nn.NLLLoss()(y_hat, y)
+        acc = Accuracy()(y_hat, y)
+        self.log('valid_loss', loss)
+        self.log('valid_acc', acc, on_step=True, on_epoch=False)
+

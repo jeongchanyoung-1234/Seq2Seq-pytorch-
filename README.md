@@ -1,29 +1,20 @@
 # Sequence-2-Sequence
 
-This model is pytorch-implemented version of Seq2Seq, see the more detailed information below.
+This model is pytorch-implemented version of Seq2Seq, focusing on addition and date formation problem. See the more detailed information below.
 https://arxiv.org/abs/1409.3215
 
 ## Quick start
 ### Training
 ```buildoutcfg
-python train.py [--parameters]
+>python main.py april/10/2001
+  날짜 변환 문제네요.
+  제 생각에 이 날짜는 2001/04/10라고 표현할 수 있을 것 같습니다.
 ```
 
-### Validation
 ```buildoutcfg
-python validate.py [date/addition] [transformer(unstable)/seq2seq] [input]
-```
-* date: convert input date into uniform style.
-  ex)
-```buildoutcfg
->python seq2seq/validate.py addition 1+3
-4
-```
-* addition: simply calculate addition. 
-  ex)
-```buildoutcfg
->python seq2seq/validate.py 7/21/96
-1996/07/21
+>python main.py 11+75
+  간단한 덧셈 문제네요.
+  제 생각에 정답은 86인 것 같습니다.
 ```
 
 ## Training Parameters

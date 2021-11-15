@@ -68,13 +68,13 @@ class Seq2SeqTrainer:
                     idx = torch.arange(batch_x.size(-1) - 1, -1, -1).long()
                     batch_x = torch.index_select(batch_x, -1, idx).contiguous()
 
-                y_hat = self.model(batch_x, batch_y)
+                y_hat = self.model(batch_x, batch_y[:, :-1])
                 loss = self.criterion(y_hat.contiguous().view(-1, y_hat.size(-1)), batch_y[:, 1:].contiguous().view(-1)) # (b * l, v)
                 acc = Accuracy()(y_hat.contiguous().reshape(-1, y_hat.size(-1)), batch_y[:, 1:].contiguous().view(-1))
 
                 self.optimizer.zero_grad()
                 loss.backward()
-                clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
+                g_norm = clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
                 self.optimizer.step()
 
                 total_train_loss += loss.detach()
@@ -91,7 +91,7 @@ class Seq2SeqTrainer:
                     if self.config.reverse_input :
                         idx = torch.arange(batch_x.size(-1) - 1, -1, -1).long()
                         batch_x = torch.index_select(batch_x, -1, idx).contiguous()
-                    y_hat = self.model(batch_x, batch_y)
+                    y_hat = self.model(batch_x, batch_y[:, :-1])
                     loss = self.criterion(y_hat.contiguous().view(-1, y_hat.size(-1)), batch_y[:, 1 :].contiguous().view(-1)) # num_classes가 먼저 와야함!
                     acc = Accuracy()(y_hat.contiguous().view(-1, y_hat.size(-1)), batch_y[:, 1 :].contiguous().view(-1)) #Constructor의 내부에서 second argument를 boolean으로 사용해서 오류
 
@@ -107,7 +107,7 @@ class Seq2SeqTrainer:
                 self.best_epoch = epoch
                 if self.config.save_model: self.save_model()
 
-            p_norm, g_norm = get_norm(self.model.parameters())
+            p_norm, _ = get_norm(self.model.parameters())
 
             if epoch % self.config.verbose == 0:
                 print('''|EPOCH ({}/{})| train_loss={:.4f} train_acc={:2.2f}% valid_loss={:.4f} valid_acc={:2.2f}% best_acc={:2.2f}% p_norm={:.4f} g_norm={:.4f} ({:2.2f}sec)'''.format(
